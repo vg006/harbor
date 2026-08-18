@@ -48,58 +48,24 @@ function generateReleaseNotes {
     echo -e $release > $releaseNotesPath
 }
 
-function generateImageSBOMs {
-    local curTag=$1
-    local baseTag=$2
-    local sbomsPath=$3
-    local syft=$4
-    local images=("${@:5}")
-    local arch=${ARCH:?ARCH must be set before generating image SBOMs}
-    local image
-    local imageRef
-    local sbom
+function generateImageSBOM {
+    local imageRef=$1
+    local sbom=$2
+    local syft=$3
 
-    mkdir -p "$sbomsPath"
-    for image in "${images[@]}"
-    do
-        imageRef="$image:${curTag}-${arch}"
-        sbom="$sbomsPath/${image##*/}-${arch}.spdx.json"
-        docker tag "$image:$baseTag" "$imageRef"
-        echo "generate SBOM: $imageRef"
-        "$syft" "$imageRef" --output "spdx-json=$sbom"
-    done
+    echo "generate SBOM: $imageRef"
+    "$syft" "$imageRef" --output "spdx-json=$sbom"
 }
 
-function attestImageSBOMs {
-    local curTag=$1
-    local registry=$2
-    local registryUser=$3
-    local registryPassword=$4
-    local sbomsPath=$5
-    local images=("${@:6}")
-    local arch=${ARCH:?ARCH must be set before attesting image SBOMs}
-    local registryPrefix=""
-    local image
-    local imageRef
-    local sbom
+function attestImageSBOM {
+    local imageRef=$1
+    local sbom=$2
 
-    if [ -n "$registry" ]; then
-        registryPrefix="$registry/"
-        printf '%s\n' "$registryPassword" | docker login "$registry" --username "$registryUser" --password-stdin
-    else
-        printf '%s\n' "$registryPassword" | docker login --username "$registryUser" --password-stdin
-    fi
-
-    for image in "${images[@]}"
-    do
-        imageRef="${registryPrefix}${image}:${curTag}-${arch}"
-        sbom="$sbomsPath/${image##*/}-${arch}.spdx.json"
-        echo "attest SBOM: $imageRef"
-        retry 5 cosign attest --yes \
-            --type https://spdx.dev/Document \
-            --predicate "$sbom" \
-            "$imageRef"
-    done
+    echo "attest SBOM: $imageRef"
+    retry 5 cosign attest --yes \
+        --type https://spdx.dev/Document \
+        --predicate "$sbom" \
+        "$imageRef"
 }
 
 function publishImages {
