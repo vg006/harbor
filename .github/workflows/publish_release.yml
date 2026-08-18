@@ -64,6 +64,9 @@ jobs:
           echo "MD5SUM_PATH=$assets_path/md5sum" >> $GITHUB_ENV
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Install Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
       - name: Sign Release Artifacts
         run: |
           cur=${{ env.CUR_TAG }}
@@ -90,19 +93,29 @@ jobs:
           set -euo pipefail
           base=${{ env.BASE_TAG }}
           cur=${{ env.CUR_TAG }}
+          sboms_path="$GITHUB_WORKSPACE/sboms"
           : > "$GITHUB_WORKSPACE/_images_all.txt"
 
           for arch in amd64 arm64; do
             export ARCH="$arch"
             tar -zxf "${{ env.ASSETS_DIR }}/harbor-offline-installer-${cur}-${arch}.tgz"
             docker load -i ./harbor/harbor.${base}.tar.gz
-            images="$(docker images --format "{{.Repository}}" --filter=reference="goharbor/*:${base}" | xargs)"
-            echo "$images" | tr ' ' '\n' >> "$GITHUB_WORKSPACE/_images_all.txt"
+            mapfile -t images < <(docker images --format "{{.Repository}}" --filter=reference="goharbor/*:${base}")
+            printf '%s\n' "${images[@]}" >> "$GITHUB_WORKSPACE/_images_all.txt"
             source tools/release/release_utils.sh
-            publishImages "$cur" "$base" "${{ secrets.DOCKER_HUB_USERNAME }}" "${{ secrets.DOCKER_HUB_PASSWORD }}" $images
-            publishPackages "$cur" "$base" "${{ github.actor }}" "${{ secrets.GITHUB_TOKEN }}" $images
+            generateImageSBOMs "$cur" "$base" "$sboms_path" "${{ steps.syft.outputs.cmd }}" "${images[@]}"
+            publishImages "$cur" "$base" "${{ secrets.DOCKER_HUB_USERNAME }}" "${{ secrets.DOCKER_HUB_PASSWORD }}" "${images[@]}"
+            attestImageSBOMs "$cur" "" "${{ secrets.DOCKER_HUB_USERNAME }}" "${{ secrets.DOCKER_HUB_PASSWORD }}" "$sboms_path" "${images[@]}"
+            publishPackages "$cur" "$base" "${{ github.actor }}" "${{ secrets.GITHUB_TOKEN }}" "${images[@]}"
+            attestImageSBOMs "$cur" "ghcr.io" "${{ github.actor }}" "${{ secrets.GITHUB_TOKEN }}" "$sboms_path" "${images[@]}"
             rm -rf harbor
           done
+      - name: Upload image SBOMs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-sboms-${{ env.CUR_TAG }}
+          path: sboms/*.spdx.json
+          if-no-files-found: error
       - name: Create multi-arch manifests
         run: |
           set -euo pipefail
