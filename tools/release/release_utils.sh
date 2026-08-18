@@ -63,7 +63,6 @@ function attestImageSBOM {
 
     echo "attest SBOM: $imageRef"
     retry 5 cosign attest --yes \
-        --type https://spdx.dev/Document \
         --predicate "$sbom" \
         "$imageRef"
 }
